@@ -20,7 +20,7 @@ float humidity    = 81.0;
 
 // Thresholds requested by you
 const float SAFE_LIMIT    = 350000.0;
-const float WARNING_LIMIT = 550000.0;
+const float WARNING_LIMIT = 700000.0;
 
 // Timing
 const unsigned long READ_INTERVAL_MS   = 500;

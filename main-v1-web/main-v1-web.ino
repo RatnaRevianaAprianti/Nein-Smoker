@@ -1,6 +1,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <MQ135.h>
+#include <DHT.h>
 
 // =====================================================
 // Nein-Smoker v2
@@ -18,6 +19,8 @@
 #define PIN_WARNLED  14   // GPIO14
 #define PIN_DEADLED  15   // GPIO15
 #define PIN_SAFELED  12   // GPIO12
+#define PIN_DHT11 4   // D2
+#define DHTTYPE DHT11
 
 // -------- WiFi AP --------
 const char* AP_SSID = "Nein-Smoker";
@@ -25,6 +28,7 @@ const char* AP_PASS = "nein1234";   // must be at least 8 chars
 
 ESP8266WebServer server(80);
 MQ135 mq135_sensor(PIN_MQ135);
+DHT dht(PIN_DHT11, DHTTYPE);
 
 // -------- Environmental correction --------
 // Replace with DHT22 later if you want better calibration
@@ -32,8 +36,8 @@ float temperature = 21.0;
 float humidity    = 81.0;
 
 // -------- Thresholds --------
-const float SAFE_LIMIT    = 350000.0;
-const float WARNING_LIMIT = 550000.0;
+const float SAFE_LIMIT    = 750000.0;
+const float WARNING_LIMIT = 1000000.0;
 
 // -------- Timing --------
 const unsigned long READ_INTERVAL_MS = 500;
@@ -150,6 +154,24 @@ void applyStateOutputs(SmokeState state, unsigned long now) {
 }
 
 void updateSensorAndState() {
+//-------DHT11-------------------
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+
+  if (!isnan(t)) {
+    temperature = t;
+  }
+
+  if (!isnan(h)) {
+    humidity = h;
+  }
+
+  correctedPPM =
+      mq135_sensor.getCorrectedPPM(
+          temperature,
+          humidity
+      );
+//-----------------MQ135-------------------
   correctedPPM = mq135_sensor.getCorrectedPPM(temperature, humidity);
 
   if (correctedPPM < SAFE_LIMIT) {
@@ -316,18 +338,29 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
       <div class="status" id="status">SAFE</div>
 
-      <div class="meta">
-        <div class="box">
-          <div class="label">Corrected PPM</div>
-          <div class="value" id="ppmBox">0</div>
-        </div>
-        <div class="box">
-          <div class="label">Threshold</div>
-          <div class="value">305k / 340k</div>
-        </div>
+    <div class="meta">
+
+      <div class="box">
+        <div class="label">Air Quality</div>
+        <div class="value" id="ppmBox">0</div>
       </div>
+
+      <div class="box">
+        <div class="label">Temperature</div>
+        <div class="value" id="tempBox">0 °C</div>
+      </div>
+
+      <div class="box">
+        <div class="label">Humidity</div>
+        <div class="value" id="humBox">0 %</div>
+      </div>
+
+      <div class="box">
+        <div class="label">Status</div>
+        <div class="value" id="statusBox">SAFE</div>
+      </div>
+
     </div>
-  </div>
 
 <script>
 async function updateData(){
@@ -337,6 +370,8 @@ async function updateData(){
 
     const pct = Math.max(1, Math.min(100, Number(data.percent) || 1));
     const ppm = Number(data.ppm) || 0;
+    const temp = Number(data.temperature) || 0;
+    const hum = Number(data.humidity) || 0;
     const status = data.status || 'UNKNOWN';
     const color = data.color || '#94a3b8';
     const bg = data.bg || '#0f172a';
@@ -352,6 +387,9 @@ async function updateData(){
     document.getElementById('percent').textContent = pct + '%';
     document.getElementById('ppm').textContent = ppm.toFixed(0) + ' ppm';
     document.getElementById('ppmBox').textContent = ppm.toFixed(0);
+    document.getElementById('tempBox').textContent = temp.toFixed(1) + " °C";
+    document.getElementById('humBox').textContent = hum.toFixed(1) + " %";
+    document.getElementById('statusBox').textContent = status;
     document.getElementById('status').textContent = status;
     document.getElementById('status').style.color = color;
     document.getElementById('status').style.borderColor = color;
@@ -379,6 +417,8 @@ void handleData() {
   String json = "{";
   json += "\"ppm\":" + String(correctedPPM, 2) + ",";
   json += "\"percent\":" + String(ppmPercent) + ",";
+  json += "\"temperature\":" + String(temperature,1) + ",";
+  json += "\"humidity\":" + String(humidity,1) + ",";
   json += "\"status\":\"" + statusText + "\",";
   json += "\"color\":\"" + statusColor + "\",";
   json += "\"bg\":\"" + statusBg + "\"";
@@ -394,6 +434,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
+  dht.begin();
   pinMode(PIN_BUZZER, OUTPUT);
   pinMode(PIN_WARNLED, OUTPUT);
   pinMode(PIN_DEADLED, OUTPUT);
@@ -434,6 +475,13 @@ void loop() {
     lastReadTime = now;
     updateSensorAndState();
 
+    //---------DHT11------------------
+    Serial.print("Temp: ");
+    Serial.print(temperature);
+    Serial.print(" C | Hum: ");
+    Serial.print(humidity);
+    Serial.print("% | ");
+    //---------MQ135------------------
     Serial.print("Corrected PPM: ");
     Serial.print(correctedPPM, 2);
     Serial.print(" | Percent: ");
